@@ -3,25 +3,88 @@
 
 import ast
 import re
+from functools import partial
 from typing import List, Tuple
+
+
+_SECRET_NAMES = (
+    r"\w*(?:api[_-]?key|secret|password|passwd|private[_-]?key"
+    r"|(?:access|auth|refresh|bearer|hf|github|slack)[_-]?token)\w*"
+    r"|token"
+)
 
 
 class SecuritySanitizer:
     """Scans and masks secrets and credentials in text using
-    pre-compiled regex patterns."""
+    pre-compiled regex patterns.
+
+    Patterns run in order, so specific token formats come before the
+    generic assignment rules. When a pattern has a `secret` group, only
+    that group is masked and the surrounding text (variable name,
+    quotes, URL) is kept so the LLM still gets useful context.
+    """
 
     PATTERNS_COMPILED = {
-        "API_KEY": re.compile(
-            r"(api[_-]?key|access[_-]?token|secret[_-]?key)\s*[:=]"
-            r"\s*['\"]([A-Za-z0-9_\-=]{8,})['\"]",
+
+        "PRIVATE_KEY": re.compile(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"
+            r"[\s\S]*?"
+            r"(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z)"
+        ),
+
+        "PRIVATE_KEY_TAIL": re.compile(
+            r"\A[A-Za-z0-9+/=\s]*?"
+            r"-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"
+        ),
+        "URL_PASSWORD": re.compile(
+            r"\b[a-z][a-z0-9+.-]*://[^\s:/@]+:(?P<secret>[^\s/@]+)@",
             re.IGNORECASE,
         ),
-        "JWT_TOKEN": re.compile(
-            r"eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*"
+        "ANTHROPIC_KEY": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
+        "OPENAI_KEY": re.compile(
+            r"\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{16,}"
         ),
-        "AWS_KEY": re.compile(r"(AKIA|ASIA)[0-9A-Z]{16}"),
-        "PRIVATE_KEY": re.compile(r"-----BEGIN (RSA|EC|PGP|PRIVATE) KEY-----"),
+        "STRIPE_KEY": re.compile(r"\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}"),
+        "GITHUB_TOKEN": re.compile(
+            r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"
+        ),
+        "SLACK_TOKEN": re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),
+        "GOOGLE_API_KEY": re.compile(r"\bAIza[A-Za-z0-9_-]{35}"),
+        "AWS_KEY": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+        "JWT_TOKEN": re.compile(
+            r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"
+        ),
+
+        "CREDENTIAL": re.compile(
+            r"\b(?:" + _SECRET_NAMES + r")[\"']?\s*[:=]\s*"
+            r"(?P<q>[\"'])(?!\[MASKED_)(?P<secret>[^\"'\s]{6,})(?P=q)",
+            re.IGNORECASE,
+        ),
+
+        "ENV_SECRET": re.compile(
+            r"^[ \t]*(?:export[ \t]+)?[A-Z0-9_]*"
+            r"(?:API_KEY|SECRET|PASSWORD|PASSWD|TOKEN)[A-Z0-9_]*="
+            r"(?!\[MASKED_|\d+(?:\s|$))(?P<secret>[^\s'\"#]{6,})",
+            re.MULTILINE,
+        ),
     }
+
+    @staticmethod
+    def _mask(secret_type: str, match: "re.Match[str]") -> str:
+        """Build the replacement for one match.
+
+        Args:
+            secret_type (str): Name of the pattern that matched.
+            match (re.Match[str]): The regex match to replace.
+
+        """
+        mask = f"[MASKED_{secret_type.removesuffix('_TAIL')}]"
+        if "secret" not in match.re.groupindex:
+            return mask
+        text = match.group(0)
+        start = match.start("secret") - match.start()
+        end = match.end("secret") - match.start()
+        return text[:start] + mask + text[end:]
 
     @classmethod
     def sanitize(cls, text: str) -> Tuple[str, int]:
@@ -30,21 +93,15 @@ class SecuritySanitizer:
 
         Args:
             text (str): The input string to sanitize.
-
-        Returns:
-            Tuple[str, int]: A tuple containing the sanitized text and
-            the total count of detected and masked secrets.
         """
         sanitized_text = text
         total_masked = 0
 
         for secret_type, pattern in cls.PATTERNS_COMPILED.items():
-            matches = list(pattern.finditer(sanitized_text))
-            if matches:
-                total_masked += len(matches)
-                sanitized_text = pattern.sub(
-                    f"[MASKED_{secret_type}]", sanitized_text
-                )
+            sanitized_text, count = pattern.subn(
+                partial(cls._mask, secret_type), sanitized_text
+            )
+            total_masked += count
 
         return sanitized_text, total_masked
 

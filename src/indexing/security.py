@@ -121,7 +121,7 @@ class SASTScanner:
         ),
         (
             re.compile(r"\bpickle\.loads?\b"),
-            "CWE-502: Insecure dematerialization with `pickle`.",
+            "CWE-502: Insecure deserialization with `pickle`.",
         ),
         (
             re.compile(r"\bos\.system\s*\("),
@@ -150,11 +150,11 @@ class SASTScanner:
         (
             "pickle",
             "loads",
-        ): "CWE-502: Insecure dematerialization with `pickle`.",
+        ): "CWE-502: Insecure deserialization with `pickle`.",
         (
             "pickle",
             "load",
-        ): "CWE-502: Insecure dematerialization with `pickle`.",
+        ): "CWE-502: Insecure deserialization with `pickle`.",
         ("yaml", "load"): "CWE-20: Loading YAML unsafely without SafeLoader.",
         (
             "subprocess",
@@ -215,7 +215,7 @@ class SASTScanner:
                                 and kw.value.value is True
                             ):
                                 msg = (
-                                    "CWE-78: Possible command injection"
+                                    "CWE-78: Possible command injection "
                                     "via `shell=True`."
                                 )
                                 if msg not in warnings:

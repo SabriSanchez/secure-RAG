@@ -1,2 +1,2 @@
-# RAG-against-the-machine
-The “RAG against the machine” project involves building a complete Retrieval-Augmented Generation (RAG) system at the local level. The goal is to ingest a code repository (vLLM), index it, search for relevant snippets to answer questions, and generate structured responses in JSON using a small language model
+# SecureRAG
+Local RAG system over the vLLM codebase using hybrid BM25 + vector retrieval, RRF and re-ranking, with Qwen3 generation on CPU. It meets the Recall@5 targets (≥80% on docs, ≥50% on code). It includes a security layer that masks secrets and credentials in retrieved context before it reaches the LLM (OWASP LLM02), handling chunk-split private keys and 10+ token formats, plus an AST-based SAST scanner mapped to CWE IDs. Tested with pytest and type-checked with mypy --strict.

@@ -21,6 +21,9 @@ lint:
 			--disallow-untyped-defs \
 			--check-untyped-defs
 
+test:
+	$(RUN) pytest
+
 lint-strict:
 	$(RUN) flake8 src
 	$(RUN) mypy src --strict
